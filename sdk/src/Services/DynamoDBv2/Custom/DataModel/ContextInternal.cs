@@ -360,71 +360,26 @@ namespace Amazon.DynamoDBv2.DataModel
         }
         private bool TryFromList(Type targetType, DynamoDBList list, DynamoDBFlatConfig flatConfig, out object output)
         {
-            var targetTypeWrapper = TypeFactory.GetTypeInfo(targetType);
-            return targetTypeWrapper.IsArray ?
-                 TryFromListToArray(targetType, list, flatConfig, out output) : //targetType is Array
-                 TryFromListToIList(targetType, list, flatConfig, out output) ; //targetType is IList or has Add method.
-        }
-
-        private bool TryFromListToIList(Type targetType, DynamoDBList list, DynamoDBFlatConfig flatConfig, out object output)
-        {
-            var targetTypeWrapper = TypeFactory.GetTypeInfo(targetType);
-            if ((!Utils.ImplementsInterface(targetType, typeof(ICollection<>)) &&
-                !Utils.ImplementsInterface(targetType, typeof(IList))) ||
-                !Utils.CanInstantiate(targetType))
+            if (!Utils.ImplementsInterface(targetType, typeof(ICollection<>)) &&
+               !Utils.ImplementsInterface(targetType, typeof(IList)))
             {
                 output = null;
                 return false;
             }
 
-            var elementType = targetTypeWrapper.GetGenericArguments()[0];
-            var collection = Utils.Instantiate(targetType);
-            IList ilist = collection as IList;
-            bool useIListInterface = ilist != null;
-            var propertyStorage = new SimplePropertyStorage(elementType);
-
-            MethodInfo collectionAdd = null;
-            if (!useIListInterface)
-            {
-                collectionAdd = targetTypeWrapper.GetMethod("Add");
-            }
-
-            foreach (DynamoDBEntry entry in list.Entries)
-            {
-                var item = FromDynamoDBEntry(propertyStorage, entry, flatConfig);
-
-                if (useIListInterface)
-                    ilist.Add(item);
-                else
-                    collectionAdd.Invoke(collection, new object[] { item });
-            }
-
-            output = collection;
-            return true;
-        }
-
-        private bool TryFromListToArray(Type targetType, DynamoDBList list, DynamoDBFlatConfig flatConfig, out object output)
-        {
-            if (!Utils.CanInstantiateArray(targetType))
+            var canInstantiate = targetType.IsArray ?
+                Utils.CanInstantiateArray(targetType) :
+                Utils.CanInstantiate(targetType);
+            if (!canInstantiate)
             {
                 output = null;
                 return false;
             }
 
             var elementType = Utils.GetElementType(targetType);
-            var array = (Array)Utils.InstantiateArray(targetType,list.Entries.Count);
             var propertyStorage = new SimplePropertyStorage(elementType);
-
-
-            for (int i = 0; i < list.Entries.Count; i++)
-            {
-                var entry = list.Entries[i];
-                var item = FromDynamoDBEntry(propertyStorage, entry, flatConfig);
-                array.SetValue(item,i);
-            }
-
-            output = array;
-            return true;
+            var items = list.Entries.Select(entry => FromDynamoDBEntry(propertyStorage, entry, flatConfig));
+            return Utils.ItemsToCollection(targetType, items, out output);
         }
 
         private bool TryFromMap(Type targetType, Document map, DynamoDBFlatConfig flatConfig, out object output)
